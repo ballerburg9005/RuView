@@ -46,6 +46,17 @@ menu "RuView CYD (original ESP32) CSI Node"
         default 5051
         range 1024 65535
 
+    config CYD_CSI_CLEAN_HT20
+        bool "Clean HT20 CSI (HT-LTF only, no mixed training fields)"
+        default y
+        help
+            Recommended for comparing CSI time series across original ESP32
+            receivers. Request HT20, keep only 802.11n 20 MHz packets, and
+            capture just their HT-LTF (64 complex values). This removes the
+            concatenated LLTF/STBC-LTF samples (up to 192 values) that cannot
+            be treated as one uniform array. If no frames arrive because the
+            AP only sends legacy data, disable this option for diagnostics.
+
     config CYD_CSI_MAX_RATE
         int "Maximum CSI packets per second"
         default 30
