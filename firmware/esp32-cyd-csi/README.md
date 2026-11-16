@@ -1,16 +1,16 @@
 # RuView CSI for the original ESP32 Cheap Yellow Display (CYD)
 
-**Target:** ESP32-2432S028 / ESP32-2432S028R (2.8-inch CYD,
-original ESP32-WROOM-32, 4 MB flash, no PSRAM), with the SPI ILI9341
-240x320 display wired exactly as in the user's board pinout.
+**Target (default): ESP32-2432S022C** (2.2-inch CYD, original ESP32-WROOM-32,
+4 MB flash, no PSRAM), with an ST7789 **8-bit parallel** LCD.
+An ESP32-2432S028-style SPI/ILI9341 profile is retained as an optional
+build configuration for other boards, **not** the user's S022C.
 
 This is a **minimal raw-CSI firmware with an onboard status screen**, not
 a port of the full ESP32-S3/C6 RuView edge firmware. It preserves the current
 upstream firmware and requires no extra hardware beyond USB power and an
-existing **2.4 GHz** Wi-Fi access point. The display is driven over
-SPI2/HSPI (not 8-bit parallel); touch is not yet implemented.
-CYD revisions using an ST7789 instead of an ILI9341 require a separate
-display driver/initialization and are not qualified in this version.
+existing **2.4 GHz** Wi-Fi access point. The S022C uses GPIO-driven **8-bit parallel** LCD control, not SPI. Its
+TF/microSD card remains SPI, which explains the apparent serial pins
+in the diagram. Touch is not yet implemented.
 
 A single board captures CSI from packets transmitted by its associated Wi-Fi
 access point and forwards raw I/Q samples to a Linux host using RuView's
@@ -51,6 +51,8 @@ unicast stream. It does not interact with cloud services.
    ```
 
 2. In **RuView CYD (original ESP32) CSI Node**, enter:
+   - Display interface: choose **S022C ST7789 parallel** (default) for the
+     user's photographed board, regardless of older SPI pinout notes.
    - Your *2.4 GHz* Wi-Fi SSID and password.
    - Linux receiver's private LAN IPv4 (e.g. `192.168.178.20`).
    - Collector UDP port, default `5005`.
@@ -86,7 +88,7 @@ unicast stream. It does not interact with cloud services.
 ## Quick screen-only test without Wi-Fi credentials
 
 Once the branch's **CYD original ESP32 CSI firmware** GitHub Actions job
-passes, download its `cyd-esp32-s028-test-firmware` artifact (three .bin
+passes, download its `cyd-esp32-s022c-test-firmware` artifact (three .bin
 files) from the successful workflow run. It is compiled **without your
 private Wi-Fi credentials**, so it is useful for checking the SPI display
 before configuring the network. The board should show `WIFI: DISCONNECTED`
@@ -103,9 +105,9 @@ python -m esptool --chip esp32 --port /dev/ttyUSB0 write_flash \
   0x10000 ruview_cyd_csi.bin
 ```
 
-Replace the serial device path. These files are produced for the **original
-ESP32 2.8-inch SPI CYD**, not an ESP32-S3 nor a parallel-screen 2.2-inch
-CYD. Rebuild via `idf.py menuconfig` (above) for Wi-Fi CSI testing.
+Replace the serial device path. These files are produced for the **original ESP32-2432S022C 2.2-inch
+parallel ST7789 CYD**, not an ESP32-S3. To use the S028-style SPI LCD, build
+from source with the alternative `CYD_LCD_SPI` choice in menuconfig. Rebuild via `idf.py menuconfig` (above) for Wi-Fi CSI testing.
 
 ## Verify CSI before running the full RuView aggregator
 
@@ -149,7 +151,7 @@ feature-state or cross-node time-sync frames.
 | Callbacks, but `queued=0` | AP BSSID filter mismatch, rate gate, invalid CSI length |
 | Queued, but receiver empty | Set correct Linux IP; inbound UDP 5005 firewall; host binding |
 | Receiver shows 0 Hz for a node | Stream absent; verify USB power and Wi-Fi association |
-| Screen is black | Check that the board is ESP32-2432S028, active-high backlight on GPIO21, SPI ILI9341. Some later revisions have ST7789; check serial for "CYD TFT unavailable" |
+| Screen is black | Verify S022C parallel is selected in menuconfig; check boot log for display init errors, GPIO0 backlight and correct ST7789/8-bit wiring |
 | Different CSI lengths | Expected: 11g / 11n / STBC and channel width change subcarrier count |
 
 Keep each CYD stationary with USB power. Rooms can have different multipath
@@ -157,38 +159,30 @@ and access-point geometry. Independent node IDs do **not** mean that this
 prototype can triangulate a person: multi-node fusion requires validation,
 time synchronization and suitable calibration.
 
-## Onboard SPI status screen (CYD 2.8-inch)
+## Onboard status screen: S022C (8-bit parallel ST7789)
 
-Display pin mapping from the original 2.8-inch ESP32-2432S028 board:
+This board is **ESP32-2432S022C**, which is physically wired for an
+8-bit parallel LCD. The original SPI pinout document belonged to another
+CYD family. The microSD card is still SPI; that does not make the LCD SPI.
 
-| LCD signal | ESP32 GPIO |
-|---|---:|
-| SPI MOSI | 13 |
-| SPI SCLK | 14 |
-| SPI CS | 15 |
-| LCD DC | 2 |
-| Backlight (active high) | 21 |
-| Reset | Board reset / EN (no dedicated GPIO) |
+| Signal | ESP32 GPIO |
+|---|---|
+| LCD D0..D7 (module DB8..DB15) | 15, 13, 12, 14, 27, 25, 33, 32 |
+| WR / RD | 4 / 2 (RD held high) |
+| RS (DC) / CS | 16 / 17 |
+| Backlight | 0 (drive only after boot; boot strap) |
+| LCD reset | Shared hardware EN (no GPIO) |
+| Touch I2C | SDA21, SCL22 (not yet used) |
+| SD card SPI | MOSI23, MISO19, SCLK18, CS5 (not used) |
 
-Uses the ILI9341 controller at a conservative **20 MHz** SPI clock.
-The 320x240 landscape screen renders a small diagnostics table:
+The 320×240 landscape interface displays actual CSI callback/s, queued/s
+and UDP send/s, Wi-Fi link, DHCP IP, AP channel/RSSI and probe counts.
+It uses a 10 KiB strip buffer, not LVGL or a full framebuffer. The screen
+is purely diagnostic and does not display synthesized vital signs.
 
-- Wi-Fi associated / disconnected and DHCP IP
-- Connected AP channel and RSSI
-- Real CSI callback, accepted, and UDP sent packets **per second**
-- Traffic probes per second and cumulative dropped packets
-- Explicit **RAW WIFI CSI ONLY** and **NOT FOR MEDICAL USE** warnings
-
-No invented breathing or heart-rate data is shown. The screen uses a 10 KiB
-DMA-compatible strip, not a full-screen framebuffer or LVGL. It updates from
-the normal FreeRTOS status task, never directly inside a CSI callback.
-Display failure should leave CSI streaming running. Touch and SD card are
-untouched and unconfigured. This has passed source compilation but **has not
-been flashed or visually verified on a real CYD**.
-
-Known caveat: a portion of ESP32-2432S028 clones use ST7789 displays instead
-of ILI9341. Those may show a blank/white screen with this firmware; use a
-matching ST7789 panel implementation after confirming the display controller.
+**Display hardware remains unverified** until a physical S022C has been
+flashed. The S028 SPI/ILI9341 driver is retained as a separate build
+choice for those other boards, not autodetected.
 
 ## Remaining functionality
 
