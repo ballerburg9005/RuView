@@ -62,6 +62,12 @@ unicast stream. It does not interact with cloud services.
      permits rare collisions; if that occurs, build with manual IDs 1..255.
      Existing local `sdkconfig` files may still have ID `1` selected:
      explicitly change it to `0` in `idf.py menuconfig` before rebuilding.
+   - **Clean HT20 CSI (recommended, on by default):** receive just the
+     802.11n HT-LTF field at 20 MHz (64 complex bins / 128 CSI bytes), rather
+     than concatenating LLTF, HT-LTF and STBC-HT-LTF into 192 apparent bins.
+     For comparing receivers, flash **both boards** with this option enabled.
+     If the screen shows zero CSI callback packets despite UDP probes,
+     disable this filter in menuconfig to diagnose the AP's packet modes.
    - Probe port default `5051`; max CSI forwarding rate default 30/s.
 
    Do **not** commit generated `sdkconfig`: it contains your Wi-Fi password.
@@ -210,8 +216,11 @@ quality, interference and router configuration.
 
 ## Packet format
 
-20-byte little-endian header plus signed 8-bit I/Q bytes as received from
-ESP-IDF. The serialized fields are:
+20-byte little-endian header plus signed 8-bit I/Q samples. Espressif's
+native CSI bytes arrive **imaginary, real**, whereas RuView's Rust
+`parse_esp32_frame()` expects **real, imaginary**. This firmware swaps
+each byte pair on the wire, preserving magnitudes and fixing phase sign.
+The serialized fields are:
 
 | Offset | Field |
 |---|---|
@@ -225,7 +234,14 @@ ESP-IDF. The serialized fields are:
 | 17 | Noise floor (int8) |
 | 18 | PPDU type (0 = legacy/HT) |
 | 19 | Flags bit 0 = 40 MHz, bit 2 = STBC, bit 5 = first 4 CSI bytes sanitized |
-| 20+ | I/Q array, 2 bytes per subcarrier |
+| 20+ | I/Q array, **real then imaginary**, signed 8-bit per component |
+
+In the clean HT20 profile, expect **64** bins per node (rather than the
+old **192**), and typically somewhat fewer frames per second because
+legacy and HT40 frames are discarded. The screen's callback/queued/UDP
+rates distinguish receiving too few suitable packets from network
+delivery failure. This is a controlled CSI format change, **not** a
+trained posture or vital-sign detector.
 
 Source reference:
 [RuView original ESP32-S3 packet serialization](../esp32-csi-node/main/csi_collector.c)
