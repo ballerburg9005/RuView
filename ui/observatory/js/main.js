@@ -131,6 +131,7 @@ class Observatory {
     // WebSocket for live data — always try auto-detect on startup
     this._ws = null;
     this._liveData = null;
+    this._lastLiveAt = 0;
     // Deferred to after the first rendered frames. Scene construction and
     // shader compilation block the main thread for seconds under software
     // WebGL (a VM with no GPU), and the probe's abort timeout below is
@@ -483,26 +484,55 @@ class Observatory {
     this._disconnectWS();
     let wsUrl = url;
     try { wsUrl = await withWsTicket(url); } catch { /* auth off or pre-ADR-272 server */ }
+    // Leaving demo mode must never cause fallback to generated people.
+    if (this.settings.dataSource !== 'ws') return;
     try {
-      this._ws = new WebSocket(wsUrl);
-      this._ws.onopen = () => {
-        console.log('[Observatory] WebSocket connected');
-        this._hud.updateSourceBadge('ws', this._ws);
+      const socket = new WebSocket(wsUrl);
+      this._ws = socket;
+      socket.onopen = () => {
+        if (this._ws !== socket) return;
+        console.log('[Observatory] WebSocket connected; waiting for CSI frames');
+        this._hud.updateSourceBadge('ws', socket);
       };
-      this._ws.onmessage = (evt) => { try { this._liveData = JSON.parse(evt.data); } catch {} };
-      this._ws.onclose = () => {
-        console.log('[Observatory] WebSocket closed, falling back to demo');
+      socket.onmessage = (evt) => {
+        if (this._ws !== socket) return;
+        try {
+          const message = JSON.parse(evt.data);
+          // /ws/sensing also emits health, vitals and event packets. Those
+          // must not replace a real sensing update with missing fields.
+          if (message.type !== 'sensing_update' ||
+              typeof message.source !== 'string' ||
+              message.source.startsWith('simulated')) return;
+          this._liveData = message;
+          this._lastLiveAt = performance.now();
+          this._hud.updateSourceBadge('ws', socket);
+        } catch { /* ignore malformed and non-sensing messages */ }
+      };
+      socket.onclose = () => {
+        if (this._ws !== socket) return;
+        console.log('[Observatory] Live WebSocket disconnected; showing no data, not demo');
         this._ws = null;
-        this.settings.dataSource = 'demo';
-        this._hud.updateSourceBadge('demo', null);
+        this._liveData = null;
+        this._lastLiveAt = 0;
+        this._hud.updateSourceBadge('ws', null);
+        // Reconnect only while the user still wants this source.
+        setTimeout(() => {
+          if (this.settings.dataSource === 'ws' &&
+              this.settings.wsUrl === url && !this._ws) void this._connectWS(url);
+        }, 3000);
       };
-      this._ws.onerror = () => {};
-    } catch {}
+      socket.onerror = () => {};
+    } catch (error) {
+      console.warn('[Observatory] WebSocket could not start:', error);
+    }
   }
 
   _disconnectWS() {
-    if (this._ws) { this._ws.close(); this._ws = null; }
+    const oldSocket = this._ws;
+    this._ws = null; // ignore stale close callbacks from the old socket
+    if (oldSocket) oldSocket.close();
     this._liveData = null;
+    this._lastLiveAt = 0;
   }
 
   // ========================================
@@ -514,24 +544,34 @@ class Observatory {
     const dt = Math.min(this._clock.getDelta(), 0.1);
     const elapsed = this._clock.getElapsedTime();
 
-    // Data source
-    if (this.settings.dataSource === 'ws' && this._liveData) {
-      this._currentData = this._liveData;
-    } else {
-      this._currentData = this._demoData.update(dt);
-    }
+    // Demo scenarios are ONLY available in demo mode. A live socket can
+    // carry valid CSI without any trustworthy 3D pose or person count.
+    const usingLiveSource = this.settings.dataSource === 'ws';
+    const freshLiveFrame = usingLiveSource &&
+      this._ws?.readyState === WebSocket.OPEN &&
+      this._liveData && performance.now() - this._lastLiveAt < 5000;
+    this._currentData = usingLiveSource
+      ? (freshLiveFrame ? this._liveData : null)
+      : this._demoData.update(dt);
     const data = this._currentData;
 
-    // Updates
+    // The current server generates heuristic skeletons from a guessed
+    // occupant count. Never render these as measured live body positions.
+    const renderData = usingLiveSource && data
+      ? { ...data, persons: [] }
+      : data;
+
     this._nebula.update(dt, elapsed);
-    this._figurePool.update(data, elapsed);
-    this._scenarioProps.update(data, this._demoData.currentScenario);
-    this._updateDotMatrixMist(data, elapsed);
-    this._updateParticleTrail(data, dt, elapsed);
+    this._figurePool.update(renderData, elapsed);
+    this._scenarioProps.update(usingLiveSource ? null : data,
+                               usingLiveSource ? null : this._demoData.currentScenario);
+    this._updateDotMatrixMist(renderData, elapsed);
+    this._updateParticleTrail(renderData, dt, elapsed);
     this._updateWifiWaves(elapsed);
     this._updateSignalField(data);
     this._hud.updateHUD(data, this._demoData);
     this._hud.updateSparkline(data);
+    if (usingLiveSource) this._hud.updateSourceBadge('ws', this._ws);
 
     // Router LED
     this._routerLed.material.opacity = 0.5 + 0.5 * Math.sin(elapsed * 8);

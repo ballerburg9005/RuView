@@ -1,0 +1,64 @@
+menu "RuView CYD (original ESP32) CSI Node"
+    choice CYD_LCD_INTERFACE
+        prompt "Display interface (select by physical board wiring)"
+        default CYD_LCD_I80
+
+        config CYD_LCD_I80
+            bool "S022C: ST7789 8-bit parallel LCD (DEFAULT)"
+            help
+                Data D0-D7: GPIO15,13,12,14,27,25,33,32.
+                WR4, RD2 (idle high), DC16, CS17, backlight GPIO0.
+
+        config CYD_LCD_SPI
+            bool "S028: ILI9341 SPI LCD (alternate boards only)"
+            help
+                SPI MOSI13, CLK14, CS15, DC2, backlight21.
+    endchoice
+
+    config CYD_CSI_WIFI_SSID
+        string "2.4 GHz Wi-Fi SSID (configured locally, never commit sdkconfig)"
+        default ""
+
+    config CYD_CSI_WIFI_PASSWORD
+        string "Wi-Fi password (configured locally)"
+        default ""
+
+    config CYD_CSI_SERVER_IP
+        string "Linux RuView UDP collector IPv4"
+        default "192.168.1.100"
+
+    config CYD_CSI_SERVER_PORT
+        int "RuView CSI UDP port"
+        default 5005
+        range 1024 65535
+
+    config CYD_CSI_NODE_ID
+        int "CSI node ID (0 = auto from this ESP32 Wi-Fi MAC)"
+        default 0
+        range 0 255
+        help
+            Use 0 for a shared firmware image flashed on multiple identical
+            boards. Each ESP32 derives a stable node ID (1..255) from its MAC.
+            If two nodes ever collide, manually select different IDs 1..255.
+
+    config CYD_CSI_PROBE_PORT
+        int "Incoming UDP traffic generator port"
+        default 5051
+        range 1024 65535
+
+    config CYD_CSI_CLEAN_HT20
+        bool "Clean HT20 CSI (HT-LTF only, no mixed training fields)"
+        default y
+        help
+            Recommended for comparing CSI time series across original ESP32
+            receivers. Request HT20, keep only 802.11n 20 MHz packets, and
+            capture just their HT-LTF (64 complex values). This removes the
+            concatenated LLTF/STBC-LTF samples (up to 192 values) that cannot
+            be treated as one uniform array. If no frames arrive because the
+            AP only sends legacy data, disable this option for diagnostics.
+
+    config CYD_CSI_MAX_RATE
+        int "Maximum CSI packets per second"
+        default 30
+        range 1 50
+endmenu
