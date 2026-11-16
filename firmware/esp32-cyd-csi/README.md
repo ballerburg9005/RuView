@@ -56,7 +56,12 @@ unicast stream. It does not interact with cloud services.
    - Your *2.4 GHz* Wi-Fi SSID and password.
    - Linux receiver's private LAN IPv4 (e.g. `192.168.178.20`).
    - Collector UDP port, default `5005`.
-   - Unique node ID: `1` for first CYD, `2` for second, etc.
+   - Node ID: `0` (default in new builds) automatically assigns a stable
+     per-device ID from the factory Wi-Fi MAC so **the same binary can be
+     flashed to multiple identical boards**. The 1-byte wire format still
+     permits rare collisions; if that occurs, build with manual IDs 1..255.
+     Existing local `sdkconfig` files may still have ID `1` selected:
+     explicitly change it to `0` in `idf.py menuconfig` before rebuilding.
    - Probe port default `5051`; max CSI forwarding rate default 30/s.
 
    Do **not** commit generated `sdkconfig`: it contains your Wi-Fi password.
@@ -76,6 +81,8 @@ unicast stream. It does not interact with cloud services.
    permission setup. Do not flash ESP32-S3 or ESP32-C6 binaries to CYD.
 
 4. The screen starts after initialization and refreshes roughly every **2 seconds**.
+   It shows the selected CSI node ID (e.g. `ESP32 S022C NODE:42`).
+   The serial console also logs the auto-assigned ID and factory MAC.
    The serial console also prints its DHCP IPv4 address and two-second statistics:
 
    ```text
@@ -127,8 +134,14 @@ python tools/traffic.py 192.168.178.81 --hz 30 --seconds 60
 When you have multiple boards, you can pass all their IPs:
 
 ```sh
-python tools/traffic.py 192.168.178.81 192.168.178.82 192.168.178.83 --hz 30 --seconds 60
+python tools/traffic.py 192.168.178.81 192.168.178.82 192.168.178.83 --hz 30 --seconds 0
 ```
+
+Use `--seconds 0` to keep sending until Ctrl+C. A single host-side script
+can feed all the boards; it requires the **current IP of each CYD**, and
+does not need to be run separately on each board. This provides consistent
+AP-to-node CSI traffic without assuming the router sends useful packets by
+itself. All nodes use the same collector IP and UDP port 5005.
 
 Monitor output reports each node's packet rate, Wi-Fi signal strength,
 subcarriers and mean raw CSI magnitude. If this works, stop the diagnostic
