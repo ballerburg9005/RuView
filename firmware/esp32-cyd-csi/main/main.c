@@ -176,8 +176,9 @@ static void wifi_start(void)
     if (strlen(CONFIG_CYD_CSI_WIFI_SSID) == 0 ||
         strlen(CONFIG_CYD_CSI_WIFI_SSID) > 32 ||
         strlen(CONFIG_CYD_CSI_WIFI_PASSWORD) > 63) {
-        ESP_LOGE(TAG, "Set valid Wi-Fi credentials with idf.py menuconfig");
-        abort();
+        ESP_LOGE(TAG, "Set Wi-Fi credentials with idf.py menuconfig; "
+                 "TFT status remains available without association");
+        return;
     }
 
     ESP_ERROR_CHECK(esp_netif_init());
@@ -372,11 +373,16 @@ void app_main(void)
                     == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
     ESP_ERROR_CHECK(xTaskCreate(status_task, "stats", 3072, NULL, 2, NULL)
                     == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
-    wifi_start();
-    /* Display is optional: any SPI/TFT error must not stop raw CSI capture. */
+    /* Bring the TFT up first, so even a blank Wi-Fi configuration shows
+     * connection diagnostics rather than silently rebooting with a black
+     * screen. No screen pin is used by the CSI radio path. */
     esp_err_t display_err = cyd_display_init();
-    if (display_err != ESP_OK) {
+    if (display_err == ESP_OK) {
+        const cyd_display_status_t initial = {.wifi_connected = false};
+        cyd_display_render(&initial);
+    } else {
         ESP_LOGW(TAG, "CYD TFT unavailable: %s (CSI still running)",
                  esp_err_to_name(display_err));
     }
+    wifi_start();
 }
