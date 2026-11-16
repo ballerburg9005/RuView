@@ -40,7 +40,7 @@ jobs:
       - name: Publish unconfigured display-test firmware
         uses: actions/upload-artifact@v4
         with:
-          name: cyd-esp32-s028-test-firmware
+          name: cyd-esp32-s022c-test-firmware
           path: |
             firmware/esp32-cyd-csi/build/bootloader/bootloader.bin
             firmware/esp32-cyd-csi/build/partition_table/partition-table.bin
