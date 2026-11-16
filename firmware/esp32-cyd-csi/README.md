@@ -83,6 +83,30 @@ unicast stream. It does not interact with cloud services.
 
    Numbers above are **illustrative**, not recorded hardware results.
 
+## Quick screen-only test without Wi-Fi credentials
+
+Once the branch's **CYD original ESP32 CSI firmware** GitHub Actions job
+passes, download its `cyd-esp32-s028-test-firmware` artifact (three .bin
+files) from the successful workflow run. It is compiled **without your
+private Wi-Fi credentials**, so it is useful for checking the SPI display
+before configuring the network. The board should show `WIFI: DISCONNECTED`
+and `IP: NONE` rather than simulate connectivity.
+
+After extracting the artifact, flash using esptool (requires serial
+port access; this overwrites the board's current application):
+
+```sh
+python -m esptool --chip esp32 --port /dev/ttyUSB0 write_flash \
+  --flash_mode dio --flash_freq 40m --flash_size 4MB \
+  0x1000 bootloader.bin \
+  0x8000 partition-table.bin \
+  0x10000 ruview_cyd_csi.bin
+```
+
+Replace the serial device path. These files are produced for the **original
+ESP32 2.8-inch SPI CYD**, not an ESP32-S3 nor a parallel-screen 2.2-inch
+CYD. Rebuild via `idf.py menuconfig` (above) for Wi-Fi CSI testing.
+
 ## Verify CSI before running the full RuView aggregator
 
 Run this on the **Linux PC**. The collector binds UDP 5005:
