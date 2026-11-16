@@ -25,6 +25,7 @@
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 #include "sdkconfig.h"
+#include "cyd_display.h"
 
 #if !CONFIG_IDF_TARGET_ESP32
 #error "This lightweight CYD firmware is for the original ESP32, not S3/C3/C6."
@@ -298,11 +299,40 @@ static void status_task(void *arg)
     (void)arg;
     uint32_t old_cb = 0, old_acc = 0, old_sent = 0, old_probe = 0;
     while (true) {
-        vTaskDelay(pdMS_TO_TICKS(5000));
-        uint32_t cb = s_callbacks, acc = s_accepted, sent = s_sent,
-                 probe = s_probes;
-        ESP_LOGI(TAG,
-                 "5s: CSI callback=%lu queued=%lu UDP sent=%lu probes=%lu "
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        const uint32_t cb = s_callbacks, acc = s_accepted, sent = s_sent,
+                       probe = s_probes;
+        const uint32_t cb_hz = (cb - old_cb) / 2,
+                       acc_hz = (acc - old_acc) / 2,
+                       sent_hz = (sent - old_sent) / 2,
+                       probe_hz = (probe - old_probe) / 2;
+        const bool connected =
+            (xEventGroupGetBits(s_wifi_events) & WIFI_READY_BIT) != 0;
+        cyd_display_status_t display = {
+            .wifi_connected = connected,
+            .rssi_dbm = 0,
+            .channel = 0,
+            .callbacks_per_s = cb_hz,
+            .accepted_per_s = acc_hz,
+            .sent_per_s = sent_hz,
+            .probes_per_s = probe_hz,
+            .drops_total = s_dropped,
+        };
+        if (connected) {
+            wifi_ap_record_t ap;
+            if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+                display.channel = ap.primary;
+                display.rssi_dbm = ap.rssi;
+            }
+            esp_netif_t *iface = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+            esp_netif_ip_info_t ip_info;
+            if (iface != NULL &&
+                esp_netif_get_ip_info(iface, &ip_info) == ESP_OK) {
+                snprintf(display.ip, sizeof(display.ip), IPSTR,
+                         IP2STR(&ip_info.ip));
+            }
+        }
+        ESP_LOGI(TAG, "2s: CSI callback=%lu queued=%lu UDP sent=%lu probes=%lu "
                  "filtered=%lu dropped=%lu queue=%u",
                  (unsigned long)(cb - old_cb),
                  (unsigned long)(acc - old_acc),
@@ -311,13 +341,17 @@ static void status_task(void *arg)
                  (unsigned long)s_filtered,
                  (unsigned long)s_dropped,
                  (unsigned)uxQueueMessagesWaiting(s_queue));
-        old_cb = cb; old_acc = acc; old_sent = sent; old_probe = probe;
+        cyd_display_render(&display);
+        old_cb = cb;
+        old_acc = acc;
+        old_sent = sent;
+        old_probe = probe;
     }
 }
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "RuView CYD CSI node %d (original ESP32, headless)",
+    ESP_LOGI(TAG, "RuView CYD CSI node %d (ESP32-2432S028 SPI TFT)",
              CONFIG_CYD_CSI_NODE_ID);
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES ||
@@ -339,4 +373,10 @@ void app_main(void)
     ESP_ERROR_CHECK(xTaskCreate(status_task, "stats", 3072, NULL, 2, NULL)
                     == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
     wifi_start();
+    /* Display is optional: any SPI/TFT error must not stop raw CSI capture. */
+    esp_err_t display_err = cyd_display_init();
+    if (display_err != ESP_OK) {
+        ESP_LOGW(TAG, "CYD TFT unavailable: %s (CSI still running)",
+                 esp_err_to_name(display_err));
+    }
 }
