@@ -1,6 +1,6 @@
 /*
  * RuView original-ESP32 CSI receiver for ESP32-2432S022 (CYD).
- * Independent of RuView's ESP32-S3/C6 firmware. No screen / GPIO drivers.
+ * Independent of RuView's ESP32-S3/C6 firmware. S022C parallel LCD by default.
  * ESP-IDF v5.4.x, target esp32, 4 MB flash, no PSRAM.
  * Outputs ADR-018-compatible raw CSI datagrams (magic 0xC5110001).
  * Not a medical device: no heartbeat / breathing / falls inference.
@@ -181,8 +181,8 @@ static void wifi_start(void)
         return;
     }
 
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    /* The TCP/IP stack and default event loop are initialized in app_main()
+     * before any FreeRTOS tasks can invoke lwIP sockets. */
     esp_netif_create_default_wifi_sta();
     const wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&init));
@@ -352,8 +352,13 @@ static void status_task(void *arg)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "RuView CYD CSI node %d (ESP32-2432S028 SPI TFT)",
+#if CONFIG_CYD_LCD_I80
+    ESP_LOGI(TAG, "RuView CSI node %d: ESP32-2432S022C ST7789 i80 LCD",
              CONFIG_CYD_CSI_NODE_ID);
+#else
+    ESP_LOGI(TAG, "RuView CSI node %d: ESP32-2432S028 ILI9341 SPI LCD",
+             CONFIG_CYD_CSI_NODE_ID);
+#endif
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES ||
         err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -361,6 +366,14 @@ void app_main(void)
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
+
+    /* Order is essential: probe_task starts with socket(AF_INET, ...).
+     * Creating it before esp_netif_init() leaves lwIP's TCP/IP mailbox
+     * uninitialized and triggers tcpip_send_msg_wait_sem: Invalid mbox.
+     * Initialize the network core even for screen-only builds without SSID. */
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+
     s_queue = xQueueCreate(CSI_QUEUE_DEPTH, sizeof(csi_packet_t));
     s_wifi_events = xEventGroupCreate();
     if (s_queue == NULL || s_wifi_events == NULL) {
