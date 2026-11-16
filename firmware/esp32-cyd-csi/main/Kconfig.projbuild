@@ -33,9 +33,13 @@ menu "RuView CYD (original ESP32) CSI Node"
         range 1024 65535
 
     config CYD_CSI_NODE_ID
-        int "Node ID (unique for every CYD)"
-        default 1
-        range 1 255
+        int "CSI node ID (0 = auto from this ESP32 Wi-Fi MAC)"
+        default 0
+        range 0 255
+        help
+            Use 0 for a shared firmware image flashed on multiple identical
+            boards. Each ESP32 derives a stable node ID (1..255) from its MAC.
+            If two nodes ever collide, manually select different IDs 1..255.
 
     config CYD_CSI_PROBE_PORT
         int "Incoming UDP traffic generator port"
