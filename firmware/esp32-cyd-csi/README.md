@@ -1,13 +1,16 @@
 # RuView CSI for the original ESP32 Cheap Yellow Display (CYD)
 
-**Target:** ESP32-2432S022 / ESP32-WROOM-32 (2.2-inch CYD, 4 MB flash,
-no PSRAM), including 2432S022C (touch) / 2432S022N (no touch).
+**Target:** ESP32-2432S028 / ESP32-2432S028R (2.8-inch CYD,
+original ESP32-WROOM-32, 4 MB flash, no PSRAM), with the SPI ILI9341
+240x320 display wired exactly as in the user's board pinout.
 
-This is a **minimal headless raw-CSI firmware**, not a port of the
-full ESP32-S3/C6 RuView edge firmware. It preserves the current upstream
-firmware and requires no extra hardware beyond a USB power supply and
-an existing **2.4 GHz** Wi-Fi access point. **The display is currently
-unused** (it may remain black). No display pins are changed.
+This is a **minimal raw-CSI firmware with an onboard status screen**, not
+a port of the full ESP32-S3/C6 RuView edge firmware. It preserves the current
+upstream firmware and requires no extra hardware beyond USB power and an
+existing **2.4 GHz** Wi-Fi access point. The display is driven over
+SPI2/HSPI (not 8-bit parallel); touch is not yet implemented.
+CYD revisions using an ST7789 instead of an ILI9341 require a separate
+display driver/initialization and are not qualified in this version.
 
 A single board captures CSI from packets transmitted by its associated Wi-Fi
 access point and forwards raw I/Q samples to a Linux host using RuView's
@@ -70,11 +73,12 @@ unicast stream. It does not interact with cloud services.
    serial-port access group is often `uucp`; use your distro's correct
    permission setup. Do not flash ESP32-S3 or ESP32-C6 binaries to CYD.
 
-4. The serial console prints its DHCP IPv4 address and 5-second statistics:
+4. The screen starts after initialization and refreshes roughly every **2 seconds**.
+   The serial console also prints its DHCP IPv4 address and two-second statistics:
 
    ```text
    Node IP: 192.168.178.81 (probe UDP 5051; collector UDP 5005)
-   5s: CSI callback=151 queued=144 UDP sent=144 probes=150 ...
+   2s: CSI callback=60 queued=58 UDP sent=58 probes=60 ...
    ```
 
    Numbers above are **illustrative**, not recorded hardware results.
@@ -121,13 +125,57 @@ feature-state or cross-node time-sync frames.
 | Callbacks, but `queued=0` | AP BSSID filter mismatch, rate gate, invalid CSI length |
 | Queued, but receiver empty | Set correct Linux IP; inbound UDP 5005 firewall; host binding |
 | Receiver shows 0 Hz for a node | Stream absent; verify USB power and Wi-Fi association |
-| Screen is black | Expected: no ST7789/i80 display code in this first version |
+| Screen is black | Check that the board is ESP32-2432S028, active-high backlight on GPIO21, SPI ILI9341. Some later revisions have ST7789; check serial for "CYD TFT unavailable" |
 | Different CSI lengths | Expected: 11g / 11n / STBC and channel width change subcarrier count |
 
 Keep each CYD stationary with USB power. Rooms can have different multipath
 and access-point geometry. Independent node IDs do **not** mean that this
 prototype can triangulate a person: multi-node fusion requires validation,
 time synchronization and suitable calibration.
+
+## Onboard SPI status screen (CYD 2.8-inch)
+
+Display pin mapping from the original 2.8-inch ESP32-2432S028 board:
+
+| LCD signal | ESP32 GPIO |
+|---|---:|
+| SPI MOSI | 13 |
+| SPI SCLK | 14 |
+| SPI CS | 15 |
+| LCD DC | 2 |
+| Backlight (active high) | 21 |
+| Reset | Board reset / EN (no dedicated GPIO) |
+
+Uses the ILI9341 controller at a conservative **20 MHz** SPI clock.
+The 320x240 landscape screen renders a small diagnostics table:
+
+- Wi-Fi associated / disconnected and DHCP IP
+- Connected AP channel and RSSI
+- Real CSI callback, accepted, and UDP sent packets **per second**
+- Traffic probes per second and cumulative dropped packets
+- Explicit **RAW WIFI CSI ONLY** and **NOT FOR MEDICAL USE** warnings
+
+No invented breathing or heart-rate data is shown. The screen uses a 10 KiB
+DMA-compatible strip, not a full-screen framebuffer or LVGL. It updates from
+the normal FreeRTOS status task, never directly inside a CSI callback.
+Display failure should leave CSI streaming running. Touch and SD card are
+untouched and unconfigured. This has passed source compilation but **has not
+been flashed or visually verified on a real CYD**.
+
+Known caveat: a portion of ESP32-2432S028 clones use ST7789 displays instead
+of ILI9341. Those may show a blank/white screen with this firmware; use a
+matching ST7789 panel implementation after confirming the display controller.
+
+## Remaining functionality
+
+The firmware can read raw CSI and send RuView-formatted UDP. It **does not**
+provide RuView's native onboarding/OTA workflow, synchronized multi-node
+localization, touchscreen setup, on-device vital sign estimation, validated
+presence detection, remote alerting or medical-grade health monitoring.
+An ordinary Wi-Fi router is a transmission source, **not** a guaranteed
+continuous 30 Hz CSI generator. The `tools/traffic.py` host script improves
+test packet yield but the actual rate depends on Wi-Fi PHY choices, signal
+quality, interference and router configuration.
 
 ## Packet format
 
