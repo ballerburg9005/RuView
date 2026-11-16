@@ -10,6 +10,11 @@ on:
       - "firmware/esp32-cyd-csi/**"
       - ".github/workflows/cyd-esp32-csi.yml"
 
+# Repeated commits during development must not build obsolete firmware.
+concurrency:
+  group: cyd-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   protocol-test:
     runs-on: ubuntu-latest
@@ -32,3 +37,13 @@ jobs:
           . /opt/esp/idf/export.sh
           idf.py -C firmware/esp32-cyd-csi set-target esp32
           idf.py -C firmware/esp32-cyd-csi build
+      - name: Publish unconfigured display-test firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyd-esp32-s028-test-firmware
+          path: |
+            firmware/esp32-cyd-csi/build/bootloader/bootloader.bin
+            firmware/esp32-cyd-csi/build/partition_table/partition-table.bin
+            firmware/esp32-cyd-csi/build/ruview_cyd_csi.bin
+          if-no-files-found: error
+          retention-days: 7
