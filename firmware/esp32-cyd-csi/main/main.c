@@ -82,6 +82,17 @@ static void csi_callback(void *ctx, wifi_csi_info_t *info)
         return;
     }
 
+#ifdef CONFIG_CYD_CSI_CLEAN_HT20
+    /* 802.11n HT20: one HT-LTF = 64 complex samples = 128 bytes.
+     * Reject legacy / HT40 / variable-length packets so DSP history
+     * does not mix incompatible channel estimates into one vector. */
+    if (info->rx_ctrl.sig_mode != 1 || info->rx_ctrl.cwb != 0 ||
+        info->len != 128) {
+        ++s_filtered;
+        return;
+    }
+#endif
+
     const int64_t now = esp_timer_get_time();
     const int64_t interval = 1000000LL / CONFIG_CYD_CSI_MAX_RATE;
     if (now - s_last_callback_us < interval) {
@@ -117,7 +128,14 @@ static void csi_callback(void *ctx, wifi_csi_info_t *info)
     frame.bytes[19] =
         (info->rx_ctrl.cwb ? 0x01 : 0x00) |
         (info->rx_ctrl.stbc ? 0x04 : 0x00);
-    memcpy(frame.bytes + CSI_HEADER_SIZE, info->buf, iq_len);
+    /* ESP-IDF supplies [imaginary, real]. The current RuView sensing
+     * server parser consumes [real, imaginary]. Normalize on the wire
+     * to the server's format; amplitudes are unchanged, phases corrected.
+     * Keep this out of the high-level sender task to avoid extra copies. */
+    for (uint16_t i = 0; i < iq_len; i += 2) {
+        frame.bytes[CSI_HEADER_SIZE + i] = info->buf[i + 1];
+        frame.bytes[CSI_HEADER_SIZE + i + 1] = info->buf[i];
+    }
     if (info->first_word_invalid) {
         memset(frame.bytes + CSI_HEADER_SIZE, 0, iq_len < 4 ? iq_len : 4);
         frame.bytes[19] |= 0x20; /* ADR-018 first-word sanitized */
@@ -231,13 +249,30 @@ static void wifi_start(void)
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
-    /* Both 11g and 11n OFDM/LTF data are useful. Only frames actually
-     * received on the association channel appear in the CSI callback. */
+#ifdef CONFIG_CYD_CSI_CLEAN_HT20
+    /* HT20 fixes training-field bandwidth and carrier indices. The router
+     * remains the RF transmitter; the PC can stay wired to the router. */
+    esp_err_t bandwidth_err = esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
+    if (bandwidth_err != ESP_OK) {
+        ESP_LOGW(TAG, "HT20 bandwidth request failed: %s", esp_err_to_name(bandwidth_err));
+    }
+    ESP_LOGI(TAG, "CSI capture: HT20, HT-LTF only (64 complex bins/frame)");
+#else
+    ESP_LOGI(TAG, "CSI capture: all training fields (diagnostic mode)");
+#endif
+
     wifi_csi_config_t csi = {
+#ifdef CONFIG_CYD_CSI_CLEAN_HT20
+        .lltf_en = false,
+        .htltf_en = true,
+        .stbc_htltf2_en = false,
+        .ltf_merge_en = false,
+#else
         .lltf_en = true,
         .htltf_en = true,
         .stbc_htltf2_en = true,
         .ltf_merge_en = true,
+#endif
         .channel_filter_en = false,
         .manu_scale = false,
         .shift = 0,
