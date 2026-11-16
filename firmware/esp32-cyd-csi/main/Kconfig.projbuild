@@ -1,4 +1,20 @@
 menu "RuView CYD (original ESP32) CSI Node"
+    choice CYD_LCD_INTERFACE
+        prompt "Display interface (select by physical board wiring)"
+        default CYD_LCD_I80
+
+        config CYD_LCD_I80
+            bool "S022C: ST7789 8-bit parallel LCD (DEFAULT)"
+            help
+                Data D0-D7: GPIO15,13,12,14,27,25,33,32.
+                WR4, RD2 (idle high), DC16, CS17, backlight GPIO0.
+
+        config CYD_LCD_SPI
+            bool "S028: ILI9341 SPI LCD (alternate boards only)"
+            help
+                SPI MOSI13, CLK14, CS15, DC2, backlight21.
+    endchoice
+
     config CYD_CSI_WIFI_SSID
         string "2.4 GHz Wi-Fi SSID (configured locally, never commit sdkconfig)"
         default ""
