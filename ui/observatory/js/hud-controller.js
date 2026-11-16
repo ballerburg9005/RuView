@@ -362,10 +362,45 @@ export class HudController {
   updateSourceBadge(dataSource, ws) {
     const dot = document.querySelector('#data-source-badge .dot');
     const label = document.getElementById('data-source-label');
-    if (dataSource === 'ws' && ws?.readyState === WebSocket.OPEN) {
-      dot.className = 'dot dot--live'; label.textContent = 'LIVE';
+    if (!dot || !label) return;
+    if (dataSource === 'ws') {
+      const connected = ws?.readyState === WebSocket.OPEN;
+      const fresh = connected && !!this._obs._liveData &&
+                    performance.now() - this._obs._lastLiveAt < 5000;
+      dot.className = fresh ? 'dot dot--live' : 'dot dot--demo';
+      label.textContent = fresh ? 'LIVE CSI' : connected ? 'WAITING CSI' : 'DISCONNECTED';
     } else {
-      dot.className = 'dot dot--demo'; label.textContent = 'DEMO';
+      dot.className = 'dot dot--demo';
+      label.textContent = 'DEMO';
+    }
+  }
+
+  _syncPresentationMode(live) {
+    if (this._presentationLive === live) return;
+    this._presentationLive = live;
+    const topSelect = document.getElementById('scenario-area');
+    if (topSelect) topSelect.style.display = live ? 'none' : '';
+    for (const id of ['opt-scenario', 'opt-cycle']) {
+      const control = document.getElementById(id);
+      const row = control?.closest('.setting-row');
+      if (row) row.style.display = live ? 'none' : '';
+    }
+    const description = document.getElementById('scenario-description');
+    if (description) {
+      if (live) {
+        description.textContent =
+          'LIVE CSI — signal changes only; no verified person counts, poses or scenarios';
+      } else {
+        description.textContent = '';
+        this._currentScenarioKey = null;
+      }
+    }
+    if (live) {
+      const badges = document.getElementById('edge-modules-bar');
+      if (badges) {
+        badges.replaceChildren();
+        badges.style.display = 'none';
+      }
     }
   }
 
@@ -374,7 +409,23 @@ export class HudController {
   // ============================================================
 
   updateHUD(data, demoData) {
-    if (!data) return;
+    const live = this._obs.settings.dataSource === 'ws';
+    this._syncPresentationMode(live);
+    if (!data) {
+      if (live) {
+        for (const id of ['hr-value', 'br-value', 'conf-value',
+                          'rssi-value', 'var-value', 'motion-value']) {
+          this._setText(id, '--');
+        }
+        this._updatePersonDots(0);
+        this._setText('persons-value', '--');
+        const presence = document.getElementById('presence-label');
+        if (presence) presence.textContent = 'NO CSI';
+        const fall = document.getElementById('fall-alert');
+        if (fall) fall.style.display = 'none';
+      }
+      return;
+    }
     const vs = data.vital_signs || {};
     const feat = data.features || {};
     const cls = data.classification || {};
@@ -421,9 +472,10 @@ export class HudController {
     this._setText('var-value', (feat.variance || 0).toFixed(2));
     this._setText('motion-value', (feat.motion_band_power || 0).toFixed(3));
 
-    // Mini person-count dots
-    const personCount = data.estimated_persons || 0;
-    this._updatePersonDots(personCount);
+    // A single-link CSI correlation heuristic is not a person counter.
+    // Do not display guessed counts as measured occupancy in live mode.
+    this._updatePersonDots(live ? 0 : (data.estimated_persons || 0));
+    if (live) this._setText('persons-value', '--');
 
     const presEl = document.getElementById('presence-indicator');
     const presLabel = document.getElementById('presence-label');
@@ -436,11 +488,11 @@ export class HudController {
     }
 
     const fallEl = document.getElementById('fall-alert');
-    if (fallEl) fallEl.style.display = cls.fall_detected ? 'block' : 'none';
+    if (fallEl) fallEl.style.display = !live && cls.fall_detected ? 'block' : 'none';
 
     // Scenario description and edge modules
-    const scenarioKey = demoData._autoMode ? (demoData.currentScenario || 'auto') : (demoData.currentScenario || 'auto');
-    if (scenarioKey !== this._currentScenarioKey) {
+    const scenarioKey = demoData.currentScenario || 'auto';
+    if (!live && scenarioKey !== this._currentScenarioKey) {
       this._currentScenarioKey = scenarioKey;
       this._updateScenarioDescription(scenarioKey);
       this._updateEdgeModules(scenarioKey);
