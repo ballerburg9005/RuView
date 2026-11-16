@@ -258,7 +258,8 @@ void cyd_display_render(const cyd_display_status_t *s)
 
     char text[40];
     paint_row(0,  "RUVIEW   CSI NODE", TITLE_COLOR);
-    paint_row(1,  "ESP32 S022C I80", DIM_COLOR);
+    snprintf(text, sizeof(text), "ESP32 S022C NODE:%u", (unsigned)s->node_id);
+    paint_row(1, text, DIM_COLOR);
     paint_row(2,  s->wifi_connected ? "WIFI: CONNECTED" : "WIFI: DISCONNECTED",
               s->wifi_connected ? GOOD_COLOR : BAD_COLOR);
 
