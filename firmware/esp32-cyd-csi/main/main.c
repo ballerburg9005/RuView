@@ -53,6 +53,7 @@ static uint8_t s_ap_bssid[6];
 static volatile bool s_have_bssid = false;
 static int64_t s_last_callback_us = 0;
 static uint32_t s_sequence = 0;
+static uint8_t s_node_id = 1; /* actual ID selected before Wi-Fi CSI starts */
 static volatile uint32_t s_callbacks = 0;
 static volatile uint32_t s_filtered = 0;
 static volatile uint32_t s_accepted = 0;
@@ -105,7 +106,7 @@ static void csi_callback(void *ctx, wifi_csi_info_t *info)
     const uint32_t magic = CSI_MAGIC;
     const uint32_t seq = s_sequence++;
     memcpy(frame.bytes + 0, &magic, sizeof(magic));
-    frame.bytes[4] = (uint8_t)CONFIG_CYD_CSI_NODE_ID;
+    frame.bytes[4] = s_node_id;
     frame.bytes[5] = 1; /* single receiving antenna */
     memcpy(frame.bytes + 6, &carriers, sizeof(carriers));
     memcpy(frame.bytes + 8, &mhz, sizeof(mhz));
@@ -204,6 +205,28 @@ static void wifi_start(void)
     memcpy(cfg.sta.password, CONFIG_CYD_CSI_WIFI_PASSWORD,
            strlen(CONFIG_CYD_CSI_WIFI_PASSWORD));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+
+    /* 0 = auto: derive a deterministic 1..255 node ID from the device's
+     * factory Wi-Fi MAC so the same binary can be flashed on multiple CYDs.
+     * The one-byte ADR-018 node field cannot guarantee global uniqueness:
+     * use the manual Kconfig override if IDs collide. */
+    if (CONFIG_CYD_CSI_NODE_ID == 0) {
+        uint8_t mac[6] = {0};
+        ESP_ERROR_CHECK(esp_wifi_get_mac(WIFI_IF_STA, mac));
+        uint32_t hash = 2166136261u;
+        for (unsigned i = 0; i < sizeof(mac); ++i) {
+            hash ^= mac[i];
+            hash *= 16777619u;
+        }
+        s_node_id = (uint8_t)(1u + (hash % 255u));
+        ESP_LOGI(TAG, "Auto node ID %u from Wi-Fi MAC %02x:%02x:%02x:%02x:%02x:%02x",
+                 (unsigned)s_node_id,
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    } else {
+        s_node_id = (uint8_t)CONFIG_CYD_CSI_NODE_ID;
+        ESP_LOGI(TAG, "Manually configured CSI node ID %u", (unsigned)s_node_id);
+    }
+
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &cfg));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
@@ -311,6 +334,7 @@ static void status_task(void *arg)
             (xEventGroupGetBits(s_wifi_events) & WIFI_READY_BIT) != 0;
         cyd_display_status_t display = {
             .wifi_connected = connected,
+            .node_id = s_node_id,
             .rssi_dbm = 0,
             .channel = 0,
             .callbacks_per_s = cb_hz,
@@ -353,11 +377,9 @@ static void status_task(void *arg)
 void app_main(void)
 {
 #if CONFIG_CYD_LCD_I80
-    ESP_LOGI(TAG, "RuView CSI node %d: ESP32-2432S022C ST7789 i80 LCD",
-             CONFIG_CYD_CSI_NODE_ID);
+    ESP_LOGI(TAG, "RuView CSI node: ESP32-2432S022C ST7789 i80 LCD");
 #else
-    ESP_LOGI(TAG, "RuView CSI node %d: ESP32-2432S028 ILI9341 SPI LCD",
-             CONFIG_CYD_CSI_NODE_ID);
+    ESP_LOGI(TAG, "RuView CSI node: ESP32-2432S028 ILI9341 SPI LCD");
 #endif
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES ||
