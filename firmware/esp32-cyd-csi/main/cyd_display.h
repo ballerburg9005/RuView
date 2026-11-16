@@ -7,6 +7,7 @@
 
 typedef struct {
     bool wifi_connected;
+    uint8_t node_id;
     char ip[16];
     int rssi_dbm;
     unsigned channel;
