@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "main.c"
+    SRCS "main.c" "cyd_display.c"
     INCLUDE_DIRS "."
-    REQUIRES esp_wifi esp_event esp_netif nvs_flash esp_timer lwip
+    REQUIRES esp_wifi esp_event esp_netif nvs_flash esp_timer lwip driver
 )
